@@ -1,0 +1,25 @@
+{
+    "api" : {
+        "prefix" : "/api"
+    },
+    "upload" : {
+        "dir" : {
+            "thrirdparty": "/var/www/REPO/slackware/thrird-party/14.2/x86_64",
+            "thrird-party": "/var/www/REPO/slackware/thrird-party/14.2/x86_64",
+            "slackbuild-thrird-party": "/var/www/REPO/slackware/thrird-party/14.2/x86_64",
+            "slackbuild-thrirdparty": "/var/www/REPO/slackware/thrird-party/14.2/x86_64"
+        },
+        "auth": "welcometothejungle"
+    },
+    "metagen" : {
+        "thrirdparty" : "/var/www/REPO/slackware/thrird-party/14.2/x86_64",
+        "thrird-party" : "/var/www/REPO/slackware/thrird-party/14.2/x86_64",
+        "slackbuild-thrird-party" : "/var/www/REPO/slackware/thrird-party/14.2/x86_64",
+        "slackbuild-thrirdparty" : "/var/www/REPO/slackware/thrird-party/14.2/x86_64"
+    },
+    "buildinfo" : {
+        "thrirdparty" : "/var/www/config-slackbuild-thrird-party.json",
+        "slackbuild-thrirdparty" : "/var/www/config-slackbuild-thrird-party.json",
+        "slackbuild-thrird-party" : "/var/www/config-slackbuild-thrird-party.json"
+    }
+}

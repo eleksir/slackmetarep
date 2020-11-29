@@ -1,0 +1,17 @@
+uwsgi:
+  http-socket: 127.0.0.1:3082
+  tcp-nodelay: true
+  tcp-fastopen: 64
+  chdir: /var/www/slackmetarep
+  plugins: psgi
+  psgi: /var/www/slackmetarep/slackmetarep.psgi
+  processes: 1
+  enable-threads: false
+  thunder-lock: true
+  logformat: %(ctime) %(var.REMOTE_ADDR) %(var.REQUEST_METHOD) %(var.REQUEST_URI) %(status) %(rsize) %(msecs)
+  need-app: true
+  log-reopen: yes
+  reload-mercy: 5
+  buffer-size: 32768
+  logto: /var/log/uwsgi/slackmetarep.log
+  die-on-term: true
