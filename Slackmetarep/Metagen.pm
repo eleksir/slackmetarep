@@ -18,72 +18,89 @@
 
 package Slackmetarep::Metagen;
 
+use 5.018;
 use warnings;
 use strict;
 
 use utf8;
-use open qw(:std :utf8);
-use vars qw/$VERSION/;
-use English qw( -no_match_vars );
+use open qw (:std :utf8);
+use English qw ( -no_match_vars );
 
+use bytes ();
 use Carp;
 use Fcntl;
-use Compress::Raw::Bzip2 qw(BZ_RUN_OK BZ_STREAM_END);
+use Compress::Raw::Bzip2 qw (BZ_RUN_OK BZ_STREAM_END);
 use Compress::Raw::Zlib;
-use POSIX qw(strftime);
+use POSIX qw (strftime);
 
-use Slackmetarep::Conf qw(loadConf);
+use Slackmetarep::Conf qw (LoadConf);
 
-use Exporter qw(import);
-our @EXPORT_OK = qw(metagen);
+use version; our $VERSION = qw (1.0);
+use Exporter qw (import);
+our @EXPORT_OK = qw (Metagen);
 
-$VERSION = '1.0';
+sub Metagen ($);
+sub __prettyFormattedDate ();        # generates current date in pretty format
+sub __trim ($);
+sub __readFile ($);
+sub __dirList ($);
+sub __writeFile (@);
+sub __bzip2Data ($);
+sub __gzipData ($);
 
-sub metagen($);
-sub __pdate;        # generates current date in pretty format
-sub __trim($);
-sub __readfile($);
-sub __dirlist($);
-sub __writefile(@);
-sub __bzdata($);
-sub __gzdata($);
-
-sub metagen ($) {
+sub Metagen ($) {
 	my $dir = shift;
-	my $c = loadConf();
+	my $c = LoadConf ();
 	$dir = $c->{metagen}->{$dir};
 
 	unless (defined $dir || ($dir eq '')) {
-		return ('400', 'text/plain', "No such repository\n");
+		return '400', 'text/plain', "No such repository\n";
 	}
 
-	my $dirlist = __dirlist ($dir);
-	return ('500', 'text/plain', $dirlist->{error}) if (defined $dirlist->{error});
+	my $dirlist = __dirList ($dir);
+
+	if (defined $dirlist->{error}) {
+		return '500', 'text/plain', $dirlist->{error};
+	}
+
 	my @filelist = @{$dirlist->{dir}};
 	$dirlist = undef;
 
-	# manifest
+	# Generate Manifest.bz2
 	my $buf = '';
 
 	foreach my $filename (@filelist) {
 		if ($filename =~ /\.lst/xmsg) {
-			my $file = __readfile("$dir/$filename");
-			return ('500', 'text/plain', $file->{error}) if (defined $file->{'error'});
+			my $file = __readFile ("$dir/$filename");
+
+			if (defined $file->{'error'}) {
+				return '500', 'text/plain', $file->{error};
+			}
+
 			$buf .= __trim $file->{data};
 			$buf .= "\n\n\n";
-			$file->{data} = ''; $file = undef;
+
+			$file->{data} = '';
+			$file = undef;
 		}
 	}
 
-	my $bzdata = __bzdata (\$buf);
-	return ('500', 'text/plain', $bzdata->{error}) if (defined $bzdata->{error});
+	my $bzippedData = __bzip2Data (\$buf);
 
-	my $manifest = __writefile ("$dir/MANIFEST.bz2", \$bzdata->{data});
-	return ('500', 'text/plain', $manifest->{error}) if (defined $manifest->{error});
+	if (defined $bzippedData->{error}) {
+		return '500', 'text/plain', $bzippedData->{error};
+	}
 
-	$bzdata->{data} = ''; $bzdata = undef;
+	my $manifest_bz2 = __writeFile ("$dir/MANIFEST.bz2", \$bzippedData->{data});
 
-	# checksums
+	if (defined $manifest_bz2->{error}) {
+		return '500', 'text/plain', $manifest_bz2->{error};
+	}
+
+	$bzippedData->{data} = '';
+	$bzippedData = undef;
+
+	# Generate CHECKSUMS.md5 and CHECKSUMS.md5.gz
 	$buf = << 'MSG';
 These are the MD5 message digests for the files in this directory.
 If you want to test your files, use 'md5sum' and compare the values to
@@ -104,50 +121,88 @@ MSG
 		next if ($filename =~ /CHECKSUMS.md5.gz$/xmsg);
 
 		if ($filename =~ /\.md5/xmsg) {
-			my $file = __readfile("$dir/$filename");
-			return ('500', 'text/plain', $file->{error}) if (defined $file->{'error'});
+			my $file = __readFile ("$dir/$filename");
+
+			if (defined $file->{'error'}) {
+				return '500', 'text/plain', $file->{error};
+			}
+
 			$buf .= $file->{data};
-			$file->{data} = ''; $file = undef;
+
+			$file->{data} = '';
+			$file = undef;
 		}
 	}
 
-	my $checksum = __writefile ("$dir/CHECKSUMS.md5", \$buf);
-	return ('500', 'text/plain', $checksum->{error}) if (defined $checksum->{error});
+	my $checksum_md5_file = __writeFile ("$dir/CHECKSUMS.md5", \$buf);
 
-	my $gzipchecksum = __gzdata(\$buf);
-	return ('500', 'text/plain', $gzipchecksum->{error}) if (defined $gzipchecksum->{error});
+	if (defined $checksum_md5_file->{error}) {
+		return '500', 'text/plain', $checksum_md5_file->{error};
+	}
+
+	# Gzip CHECKSUM.md5 contents
+	my $gzippedBuf = __gzipData (\$buf);
+
+	if (defined $gzippedBuf->{error}) {
+		return '500', 'text/plain', $gzippedBuf->{error};
+	}
+
 	$buf = '';
 
-	my $checksumgz = __writefile ("$dir/CHECKSUMS.md5.gz", \$gzipchecksum->{data});
-	return ('500', 'text/plain', $checksumgz->{error}) if (defined $checksumgz->{error});
-	$gzipchecksum->{data} = ''; $gzipchecksum = undef;
+	my $checksum_md5_gz_file = __writeFile ("$dir/CHECKSUMS.md5.gz", \$gzippedBuf->{data});
 
-	# packages
-	$buf = sprintf "PACKAGES.TXT;  %s\n\n\n", __pdate;
+	if (defined $checksum_md5_gz_file->{error}) {
+		return '500', 'text/plain', $checksum_md5_gz_file->{error};
+	}
 
-	foreach my $filename (@filelist) {
+	$gzippedBuf->{data} = '';
+	$gzippedBuf = undef;
+
+	# Generate PACKAGES.txt and PACKAGES.txt.gz
+	$buf = sprintf "PACKAGES.TXT;  %s\n\n\n", __prettyFormattedDate ();
+
+	# At this point we have no need to preserve @filelist, we rather want to empty it
+	while (my $filename = shift @filelist) {
 		if ($filename =~ /\.meta/xmsg) {
-			my $file = __readfile("$dir/$filename");
-			return ('500', 'text/plain', $file->{error}) if (defined $file->{'error'});
+			my $file = __readFile ("$dir/$filename");
+
+			if (defined $file->{'error'}) {
+				return '500', 'text/plain', $file->{error};
+			}
+
 			$buf .= __trim ($file->{data});
 			$buf .= "\n\n";
-			$file->{data} = ''; $file = undef;
+
+			$file->{data} = '';
+			$file = undef;
 		}
 	}
 
-	my $packages = __writefile ("$dir/PACKAGES.TXT", \$buf);
-	return ('500', 'text/plain', $packages->{error}) if (defined $packages->{error});
+	my $packages_txt_file = __writeFile ("$dir/PACKAGES.TXT", \$buf);
 
-	my $gzippackages = __gzdata(\$buf);
-	return ('500', 'text/plain', $gzippackages->{error}) if (defined $gzippackages->{error});
+	if (defined $packages_txt_file->{error}) {
+		return '500', 'text/plain', $packages_txt_file->{error};
+	}
+
+	$gzippedBuf = __gzipData (\$buf);
+
+	if (defined $gzippedBuf->{error}) {
+		return '500', 'text/plain', $gzippedBuf->{error};
+	}
+
 	$buf = '';
 
-	my $packagesgz = __writefile ("$dir/PACKAGES.TXT.gz", \$gzippackages->{data});
-	return ('500', 'text/plain', $packagesgz->{error}) if (defined $packagesgz->{error});
-	$gzippackages->{data} = ''; $gzippackages = undef;
+	my $packages_txt_gz_file = __writeFile ("$dir/PACKAGES.TXT.gz", \$gzippedBuf->{data});
 
-	# filelist
-	$buf = __pdate;
+	if (defined $packages_txt_gz_file->{error}) {
+		return ('500', 'text/plain', $packages_txt_gz_file->{error});
+	}
+
+	$gzippedBuf->{data} = '';
+	$gzippedBuf = undef;
+
+	# Generate FILELIST.txt
+	$buf = __prettyFormattedDate;
 	$buf .= "\n\n";
 	$buf .= << 'BUFFER';
 Here is the file list for this directory,
@@ -158,17 +213,19 @@ refresh the mirror.
 
 BUFFER
 
-	# dir listing is not actual, so we need to re-read it
-	$#filelist = -1;
-	$dirlist = __dirlist ($dir);
-	return ('500', 'text/plain', $dirlist->{error}) if (defined $dirlist->{error});
+	$dirlist = __dirList ($dir);
+
+	if (defined $dirlist->{error}) {
+		return '500', 'text/plain', $dirlist->{error};
+	}
+
 	@filelist = @{$dirlist->{dir}};
 	$dirlist = undef;
 
-	while (my $file = shift (@filelist)) {
-		my $filename = sprintf ('%s/%s', $dir, $file);
+	while (my $file = shift @filelist) {
+		my $filename = sprintf '%s/%s', $dir, $file;
 		my @stat = stat $filename;
-		my @date = localtime ($stat[10]);
+		my @date = localtime $stat[10];
 
 		$buf .= sprintf (
 			"-rw-r--r-- %d root root % 8d %04d-%02d-%02d %02d:%02d ./%s\n",
@@ -184,13 +241,18 @@ BUFFER
 	}
 
 	$#filelist = -1;
-	my $filelist = __writefile ("$dir/FILELIST.TXT", \$buf);
-	return ('500', 'text/plain', $filelist->{error}) if (defined $filelist->{error});
+	my $filelist = __writeFile ("$dir/FILELIST.TXT", \$buf);
+
+	if (defined $filelist->{error}) {
+		return '500', 'text/plain', $filelist->{error};
+	}
+
 	$buf = '';
-	return  ('200', 'text/plain', "Done\n");
+
+	return '200', 'text/plain', "Done\n";
 }
 
-sub __pdate {
+sub __prettyFormattedDate () {
 	my @time = gmtime(time);
 	my @DAYOFWEEK = qw(Sun Mon Tue Wed Thu Fri Sat);
 	my @MONTH = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Nov Dec);
@@ -201,17 +263,17 @@ sub __trim ($) {
 	my $str = shift;
 
 	while (substr ($str, 0, 1) =~ /^\s$/xms) {
-		$str = substr ($str, 1);
+		$str = substr $str, 1;
 	}
 
 	while (substr ($str, -1, 1) =~ /^\s$/xms) {
-		chop ($str);
+		chop $str;
 	}
 
 	return $str;
 }
 
-sub __readfile ($) {
+sub __readFile ($) {
 	my $file = shift;
 	my $ret;
 
@@ -225,7 +287,7 @@ sub __readfile ($) {
 	binmode $FILEHANDLE;
 	my $buf;
 	my $len = (stat $file)[7];
-	my $readlen = read ($FILEHANDLE, $buf, $len);
+	my $readlen = read $FILEHANDLE, $buf, $len;
 	close $FILEHANDLE; ## no critic (InputOutput::RequireCheckedSyscalls)
 
 	unless (defined $readlen) {
@@ -246,7 +308,7 @@ sub __readfile ($) {
 	return $ret;
 }
 
-sub __writefile (@) {
+sub __writeFile (@) {
 	my $file = shift;
 	my $dataref = shift;
 	my $ret;
@@ -260,10 +322,8 @@ sub __writefile (@) {
 
 	binmode $FILEHANDLE;
 
-	use bytes;
-	my $len = length ${$dataref};
-	no bytes;
-	my $writelen = syswrite ($FILEHANDLE, ${$dataref}, $len);
+	my $len = bytes::length ${$dataref};
+	my $writelen = syswrite $FILEHANDLE, ${$dataref}, $len;
 	close $FILEHANDLE; ## no critic (InputOutput::RequireCheckedSyscalls)
 
 	unless (defined $writelen) {
@@ -284,7 +344,7 @@ sub __writefile (@) {
 	return $ret;
 }
 
-sub __dirlist ($) {
+sub __dirList ($) {
 	my $dir = shift;
 	my $res;
 	my @files;
@@ -307,10 +367,9 @@ sub __dirlist ($) {
 	return $res;
 }
 
-sub __bzdata ($) {
+sub __bzip2Data ($) {
 	my $databufref = shift;
 	my $ret;
-	my $bzdata;
 	my $bz = Compress::Raw::Bzip2->new (1, 9, 0);
 
 	unless (defined $bz) {
@@ -320,35 +379,36 @@ sub __bzdata ($) {
 		return $ret;
 	}
 
-	if ($bz->bzdeflate(${$databufref}, $bzdata) != BZ_RUN_OK) {
+	if ($bz->bzdeflate (${$databufref}, $ret->{data}) != BZ_RUN_OK) {
 		my $msg = 'Unable to perofrm bzip2 compression';
 		carp "[FATA] $msg";
+		delete ($ret->{data});
 		$ret->{error} = $msg;
 		return $ret;
 	}
 
-	if ($bz->bzflush($bzdata) != BZ_RUN_OK) {
+	if ($bz->bzflush ($ret->{data}) != BZ_RUN_OK) {
 		my $msg = 'Unable to flush bz buffer';
 		carp "[FATA] $msg";
+		delete ($ret->{data});
 		$ret->{error} = $msg;
 		return $ret;
 	}
 
-	if ($bz->bzclose($bzdata) != BZ_STREAM_END) {
+	if ($bz->bzclose ($ret->{data}) != BZ_STREAM_END) {
 		my $msg = 'Unable to flush and close bz buffer';
 		carp "[FATA] $msg";
+		delete ($ret->{data});
 		$ret->{error} = $msg;
 		return $ret;
 	}
 
-	$ret->{data} = $bzdata;
 	return $ret;
 }
 
-sub __gzdata ($) {
+sub __gzipData ($) {
 	my $databufref = shift;
 	my $ret;
-	my $gzdata;
 
 	my $gz = Compress::Raw::Zlib::Deflate->new (
 		-Level => Z_BEST_COMPRESSION,
@@ -364,21 +424,22 @@ sub __gzdata ($) {
 		return $ret;
 	}
 
-	if ($gz->deflate(${$databufref}, $gzdata) != Z_OK) {
+	if ($gz->deflate (${$databufref}, $ret->{data}) != Z_OK) {
 		my $msg = 'Unable to deflate';
 		carp "[FATA] $msg";
+		delete ($ret->{data});
 		$ret->{error} = $msg;
 		return $ret;
 	}
 
-	if ($gz->flush($gzdata) != Z_OK) {
+	if ($gz->flush ($ret->{data}) != Z_OK) {
 		my $msg = 'Unable to flush gz object';
 		carp "[FATA] $msg";
+		delete ($ret->{data});
 		$ret->{error} = $msg;
 		return $ret;
 	}
 
-	$ret->{data} = $gzdata;
 	return $ret;
 }
 

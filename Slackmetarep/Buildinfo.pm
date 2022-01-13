@@ -1,84 +1,95 @@
 package Slackmetarep::Buildinfo;
 
+use 5.018;
 use strict;
 use warnings;
-use vars qw/$VERSION/;
-use English qw( -no_match_vars );
+use utf8;
+use open qw (:std :utf8);
+use English qw ( -no_match_vars );
+
 use Carp;
-
+use Encode qw (encode);
 use JSON::XS;
-use Slackmetarep::Conf qw(loadConf);
 
-use Exporter qw(import);
-our @EXPORT_OK = qw(buildinfo);
+use Slackmetarep::Conf qw (LoadConf);
 
-$VERSION = '1.0';
+use version; our $VERSION = qw (1.0);
+use Exporter qw (import);
+our @EXPORT_OK = qw (BuildInfo);
 
-my $c = loadConf();
+my $c = LoadConf ();
 
-sub buildinfo ($) {
+sub BuildInfo ($) {
 	my $repo = shift;
 	my ($status, $content, $msg) = ('400', 'text/plain', "Bad Request?\n");
 
-	return ($status, $content, $msg) unless ($repo =~ /\//xmsg);
+	# Request cosists of repo/package, so it must contain slash
+	unless ($repo =~ /\//xmsg) {
+		return $status, $content, $msg;
+	}
 
-	my ($config, $package) = split(/\//xms, $repo);
+	my ($config, $package) = split /\//xms, $repo;
 
-	unless (defined($c->{buildinfo}->{$config})) {
+	unless (defined $c->{buildinfo}->{$config}) {
 		$msg = "Config repo $config is not defined in config.\n";
-		return ($status, $content, $msg);
+		return $status, $content, $msg;
 	}
 
 	open (my $jhandle, '<', $c->{buildinfo}->{$config}) or do {
-		$status = '500';
 		$msg = "Unable to open $c->{buildinfo}->{$config}; $OS_ERROR\n";
 		carp '[FATA] ' . $msg;
-		return ($status, $content, $msg);
+		return '500', $content, $msg;
 	};
 
-	my $len = (stat($c->{buildinfo}->{$config}))[7];
+	my $len = (stat $c->{buildinfo}->{$config})[7];
 	my $json;
-	my $readlen = read ($jhandle, $json, $len);
+	# Use binmode in order to get read bytes (not chars!) from read()
+	binmode $jhandle;
+	my $readlen = read $jhandle, $json, $len;
 	close $jhandle; ## no critic (InputOutput::RequireCheckedSyscalls
 
-	unless (defined($readlen)) {
-		$status = '500';
+	unless (defined $readlen) {
 		$msg = "Unable to read $c->{buildinfo}->{$config}: $OS_ERROR";
 		carp '[FATA] ' . $msg;
-		return ($status, $content, $msg);
+		return '500', $content, $msg;
 	}
 
 	if ($len != $readlen) {
-		$status = '500';
 		$msg = "Size of $c->{buildinfo}->{$config} $len bytes but actually read $readlen bytes";
 		carp '[FATA] ' . $msg;
-		return ('500', $content, "Unable to read $c->{buildinfo}->{$config}\n");
+		return '500', $content, "Unable to read $c->{buildinfo}->{$config}\n";
 	}
 
-	my $j = eval { decode_json($json) } or do {
-		$status = '500';
+	# Make sure that we have utf-8 text here
+	$json = encode 'UTF-8', $json;
+
+	# Use relaxed decoder, we don't want to mess with human errors, right?
+	my $j = eval {
+		my $jq = JSON::XS->new->utf8->relaxed;
+		$jq->decode ($json);
+	} or do {
 		$msg = "Error during decoding $c->{buildinfo}->{$config}; $EVAL_ERROR\n";
 		carp '[FATA] ' . $msg;
-		return ($status, $content, $msg);
+		return '500', $content, $msg;
 	};
 
-	unless (defined($j->{$package})) {
+	$json = '';
+
+	unless (defined $j->{$package}) {
 		$msg = "$package is not defined in config for $config.\n";
 		carp '[ERRO] ' . $msg;
-		return ($status, $content, $msg);
+		return $status, $content, $msg;
 	}
 
-	$json = JSON::XS->new->pretty->canonical->indent(1)->encode($j->{$package}) or do {
-		$status = '500';
+	# Use small indentation, just 1 space and default formatting
+	my $jq = JSON::XS->new->pretty->canonical->indent (1);
+	$msg = $jq->encode ($j->{$package}) or do {
 		$msg = "Unable to encode json.\n";
 		carp '[ERRO] ' . $msg;
-		return ($status, $content, $msg);
+		return '500', $content, $msg;
 	};
 
-	$status = '200';
-	$content = 'application/json';
-	$msg = $json;
-	return ($status, $content, $msg);
+	return '200', 'application/json', $msg;
 }
 
 1;

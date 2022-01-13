@@ -1,22 +1,28 @@
 ## no critic (Modules::RequireExplicitPackage)
+use 5.018;
 use strict;
 use warnings;
+use utf8;
+use open qw (:std :utf8);
 
-# my plugins
-use lib qw(. ./vendor_perl ./vendor_perl/lib/perl5);
-use Slackmetarep::Conf qw(loadConf);
-use Slackmetarep::Upload qw(upload);
-use Slackmetarep::Metagen qw(metagen);
-use Slackmetarep::Buildinfo qw(buildinfo);
+# Application modules
+use lib qw (. ./vendor_perl ./vendor_perl/lib/perl5);
+use Slackmetarep::Conf qw (LoadConf);
+use Slackmetarep::Upload qw (Upload);
+use Slackmetarep::Metagen qw (Metagen);
+use Slackmetarep::Buildinfo qw (BuildInfo);
 
-use version; our $VERSION = qv(1.0);
+use version; our $VERSION = qw (1.0);
+use Exporter qw (import);
 
-my $CONF = loadConf ();
+my $CONF = LoadConf ();
 
-if ($CONF->{api}->{prefix} eq '/') { $CONF->{api}->{prefix} = ''; }
 my $prefix = $CONF->{api}->{prefix};
 
-                 # that is not module.
+if ($CONF->{api}->{prefix} eq '/') {
+	$prefix = '';
+}
+
 my $app = sub { ## no critic (Modules::RequireEndWithOne)
 	my $env = shift;
 
@@ -31,7 +37,7 @@ my $app = sub { ## no critic (Modules::RequireEndWithOne)
 		if (defined($env->{HTTP_AUTH}) && ($env->{HTTP_AUTH} eq $CONF->{upload}->{auth})) {
 			if (($upload !~ /\.\./xmsg) && ($upload =~ /^[_\-\+\/\.[:alnum:]]+$/xmsg)) {
 				if (defined($env->{CONTENT_LENGTH}) && ($env->{CONTENT_LENGTH} > 0)) {
-					($status, $content, $msg) = upload ($env->{'psgi.input'}, $env->{CONTENT_LENGTH}, $upload);
+					($status, $content, $msg) = Upload ($env->{'psgi.input'}, $env->{CONTENT_LENGTH}, $upload);
 				}
 			} else {
 				$msg = "Something wrong with upload path.\n";
@@ -41,11 +47,11 @@ my $app = sub { ## no critic (Modules::RequireEndWithOne)
 		}
 	} elsif ($env->{PATH_INFO} eq "$prefix/metagen") {
 		if (defined($env->{HTTP_REPO})) {
-			($status, $content, $msg) = metagen ($env->{HTTP_REPO});
+			($status, $content, $msg) = Metagen ($env->{HTTP_REPO});
 		}
 	} elsif ($env->{PATH_INFO} eq "$prefix/buildinfo") {
 		if (defined($env->{HTTP_REPO})) {
-			($status, $content, $msg) = buildinfo ($env->{HTTP_REPO});
+			($status, $content, $msg) = BuildInfo ($env->{HTTP_REPO});
 		}
 	}
 

@@ -1,22 +1,22 @@
 package Slackmetarep::Upload;
 
+use 5.018;
 use strict;
 use warnings;
 use vars qw/$VERSION/;
-use English qw( -no_match_vars );
+use English qw ( -no_match_vars );
 use Carp;
 
 use Fcntl;
-use Slackmetarep::Conf qw(loadConf);
+use Slackmetarep::Conf qw (LoadConf);
 
-use Exporter qw(import);
-our @EXPORT_OK = qw(upload);
+use version; our $VERSION = qw (1.0);
+use Exporter qw (import);
+our @EXPORT_OK = qw (Upload);
 
-$VERSION = '1.0';
+my $c = LoadConf ();
 
-my $c = loadConf ();
-
-sub upload {
+sub Upload {
 	my $input = shift;        # file descriptor with data being uploaded
 	my $len = shift;          # expected data length (from client)
 	my $name = shift;         # upload "dir" and filename
@@ -26,25 +26,30 @@ sub upload {
 	return ($status, $content, "No name supplied.\n") unless (defined $name);
 
 	my $d;
-	($d, $name) = split (/\//xms, $name, 2);
+	($d, $name) = split /\//xms, $name, 2;
 
-	return ($status, $content, "Name does not match pattern.\n") unless ($name =~ /^[[:alnum:]_\-\+\.]+$/xmsg);
+	unless ($name =~ /^[[:alnum:]_\-\+\.]+$/xmsg) {
+		return $status, $content, "Name does not match pattern.\n";
+	}
 
 	my $match;
 
-	foreach my $uploaddir (keys(%{$c->{upload}->{dir}})) {
+	foreach my $uploaddir (keys %{$c->{upload}->{dir}}) {
 		if ($d eq $uploaddir) {
 			$match = 1;
 			last;
 		}
 	}
 
-	return ($status, $content, "Incorrect destination dir.\n") unless $match; # incorrect destination in url
+	# Incorrect destination in url
+	unless ($match) {
+		return $status, $content, "Incorrect destination dir.\n";
+	}
 
-	$name = sprintf('%s/%s', $c->{upload}->{dir}->{$d}, $name);
+	$name = sprintf '%s/%s', $c->{upload}->{dir}->{$d}, $name;
 
 	if ($len > 0) {
-		if (sysopen (my $FH, $name, O_CREAT|O_TRUNC|O_WRONLY)) {
+		if (sysopen my $FH, $name, O_CREAT|O_TRUNC|O_WRONLY) {
 			my $buf;
 			my $readlen = 0;
 			my $totalread = 0;
@@ -55,28 +60,33 @@ sub upload {
 			}
 
 			do {
-				$readlen = $input->read($buf, $buflen);
+				$readlen = $input->read ($buf, $buflen);
 
 				my $written = syswrite $FH, $buf, $readlen;
 
-				unless (defined($written)) { # out of space?
+				# Not enough free space?
+				unless (defined $written) {
 					close $FH; ## no critic (InputOutput::RequireCheckedSyscalls)
 					unlink $name;
+					$buf = '';
 					carp "[FATA] Unable to write to $name: $OS_ERROR";
-					return ('500', $content, "An error has occured during upload: $OS_ERROR\n");
+					return '500', $content, "An error has occured during upload: $OS_ERROR\n";
 				}
 
+				# Other error
 				if ($readlen != $written) {
 					close $FH; ## no critic (InputOutput::RequireCheckedSyscalls)
 					unlink $name;
+					$buf = '';
 					carp "[FATA] Must write $readlen bytes, but actualy wrote $written bytes to $name";
-					return ('500', $content, "An error has occured during upload: $OS_ERROR\n");
+					return '500', $content, "An error has occured during upload: $OS_ERROR\n";
 				}
 
 				$totalread += $readlen;
 			} while ($readlen == $buflen);
 
 			close $FH; ## no critic (InputOutput::RequireCheckedSyscalls)
+			$buf = '';
 
 			if ($totalread != $len) {
 				($content, $msg) = ($content, "Content-Length does not match amount of recieved bytes.\n");
@@ -91,7 +101,7 @@ sub upload {
 		$msg = "Incorrect Content-Length\n";
 	}
 
-	return ($status, $content, $msg);
+	return $status, $content, $msg;
 }
 
 1;
