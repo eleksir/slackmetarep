@@ -10,10 +10,6 @@ For receiving package uploads and creating metadata for slackware package reposi
 
 Main idea is to use it in automated CI process.
 
-## What this application is not for?
-
-It is not designed for large scale repositories or for use as a public service.
-
 ## How it works?
 
 Upload file to repository via PUT request:
@@ -111,7 +107,7 @@ This application is tested and runs okay on Slackware64-14.2.
 
 ## How to run this?
 
-Via [uWSGI](https://github.com/unbit/uwsgi).
+Via [uWSGI](https://github.com/unbit/uwsgi) 2.0.19.
 
 ```bash
 #!/bin/ash
@@ -139,19 +135,16 @@ exec sudo -u apache -g apache /usr/bin/uwsgi \
 
 ```
 
-At least i use uwsgi-2.0.19 for this. Starman suits well too and should work without any problems. You can also try
-[Nginx UNIT](https://unit.nginx.org/), but it was totally not tested.
-
 As mentioned above this application tested on Slackware Linux 14.2 for x86_64. At least you'll need perl-AnyEvent,
 perl-Coro, perl-Devel-StackTrace, perl-local-lib, cpanminus, perl-common-sense, perl-Guard, perl-EV,
-perl-Canary-Stability, perl-event. You can get SlackBuilds for them on [SBo](https://slackbuilds.org/repository/14.2/).
+perl-Canary-Stability, perl-event, uwsgi. You can get SlackBuilds for them on [SBo](https://slackbuilds.org/repository/14.2/).
 After installing all these packages you'll be able to bootatrap and run slackmetarep.
 
 ## How to contribute?
 
 Got something about this project? Make PR.
 
-## Who should i thank?
+## Who should I thank?
 
 Slackware mainatiners for their continous labour. Notably [AlienBob](https://docs.slackware.com/wiki:user:alienbob) and
 [SBo team](https://slackbuilds.org/contributors/).

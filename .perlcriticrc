@@ -92,3 +92,6 @@ verbose     = 8
 
 [-ValuesAndExpressions::ProhibitLongChainsOfMethodCalls]
 # But i do really want to use them in JSON::XS declaration!
+
+[-Subroutines::ProhibitExplicitReturnUndef]
+# Okay, fuckoff

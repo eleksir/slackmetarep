@@ -4,14 +4,14 @@
 # Assume that whole operation takes resonable amount of time to perform it syncronously
 
 # metadata consists of
-# * CHECKSUMS.md5 or CHECKSUMS.md5.gz - checksum of each file in repo
-# * ChangeLog.txt - optional, contains history of changes, this script does not
-#                   handle it
-# * FILELIST.TXT  - whole list of files that are part of repostory data or
-#                   metadata
-# * PACKAGES.TXT  - packages description with metainfo such as relative path in
-#                   repo, compressed size and uncompressed size
-# * MANIFEST.bz2  - list of files in each package
+# * CHECKSUMS.md5    - md5 of each file in repo
+# * CHECKSUMS.md5.gz - same as above, gzipped form
+# * ChangeLog.txt    - optional, contains history of changes, this script does not handle it
+# * FILELIST.TXT     - whole list of files that are part of repostory data or metadata
+# * PACKAGES.TXT     - packages description with metainfo such as relative path in repo, compressed size and
+#                      uncompressed size
+# * PACKAGES.txt.gz  - same as above, gzipped form
+# * MANIFEST.bz2     - list of files in each package
 
 # TODO: make metadata in atomic way
 # TODO: validate metadata
@@ -28,7 +28,9 @@ use English qw ( -no_match_vars );
 
 use bytes ();
 use Carp;
-use Fcntl;
+use Fcntl qw (:DEFAULT :flock);
+use File::Temp;
+use File::Copy qw (move);
 use Compress::Raw::Bzip2 qw (BZ_RUN_OK BZ_STREAM_END);
 use Compress::Raw::Zlib;
 use POSIX qw (strftime);
@@ -39,6 +41,8 @@ use version; our $VERSION = qw (1.0);
 use Exporter qw (import);
 our @EXPORT_OK = qw (Metagen);
 
+my $lockfile = '.update.lock';
+
 sub Metagen ($);
 sub __prettyFormattedDate ();        # generates current date in pretty format
 sub __trim ($);
@@ -47,6 +51,12 @@ sub __dirList ($);
 sub __writeFile (@);
 sub __bzip2Data ($);
 sub __gzipData ($);
+sub __mktmpfiles ($);
+sub __renametmpfiles (@);
+sub __removetmpfiles ($);
+sub __setlock (@);
+sub __removelock (@);
+
 
 sub Metagen ($) {
 	my $dir = shift;
@@ -57,6 +67,8 @@ sub Metagen ($) {
 		return '400', 'text/plain', "No such repository\n";
 	}
 
+	my $lock->{filename} = sprintf '%s/%s', $dir, $lockfile;
+
 	my $dirlist = __dirList ($dir);
 
 	if (defined $dirlist->{error}) {
@@ -66,6 +78,9 @@ sub Metagen ($) {
 	my @filelist = @{$dirlist->{dir}};
 	$dirlist = undef;
 
+	$lock = __setlock ($lock);
+	my $tmpfile = __mktempfiles ($dir);
+
 	# Generate Manifest.bz2
 	my $buf = '';
 
@@ -74,6 +89,8 @@ sub Metagen ($) {
 			my $file = __readFile ("$dir/$filename");
 
 			if (defined $file->{'error'}) {
+				__removetmpfiles ($tmpfile);
+				__removelock ($lock);
 				return '500', 'text/plain', $file->{error};
 			}
 
@@ -88,12 +105,16 @@ sub Metagen ($) {
 	my $bzippedData = __bzip2Data (\$buf);
 
 	if (defined $bzippedData->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $bzippedData->{error};
 	}
 
-	my $manifest_bz2 = __writeFile ("$dir/MANIFEST.bz2", \$bzippedData->{data});
+	my $manifest_bz2 = __writeFile ($tmpfile->{'MANIFEST.bz2'}, \$bzippedData->{data});
 
 	if (defined $manifest_bz2->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $manifest_bz2->{error};
 	}
 
@@ -124,6 +145,8 @@ MSG
 			my $file = __readFile ("$dir/$filename");
 
 			if (defined $file->{'error'}) {
+				__removetmpfiles ($tmpfile);
+				__removelock ($lock);
 				return '500', 'text/plain', $file->{error};
 			}
 
@@ -134,9 +157,11 @@ MSG
 		}
 	}
 
-	my $checksum_md5_file = __writeFile ("$dir/CHECKSUMS.md5", \$buf);
+	my $checksum_md5_file = __writeFile ($tmpfile->{'CHECKSUMS.md5'}, \$buf);
 
 	if (defined $checksum_md5_file->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $checksum_md5_file->{error};
 	}
 
@@ -144,14 +169,18 @@ MSG
 	my $gzippedBuf = __gzipData (\$buf);
 
 	if (defined $gzippedBuf->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $gzippedBuf->{error};
 	}
 
 	$buf = '';
 
-	my $checksum_md5_gz_file = __writeFile ("$dir/CHECKSUMS.md5.gz", \$gzippedBuf->{data});
+	my $checksum_md5_gz_file = __writeFile ($tmpfiles->{'CHECKSUMS.md5.gz'}, \$gzippedBuf->{data});
 
 	if (defined $checksum_md5_gz_file->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $checksum_md5_gz_file->{error};
 	}
 
@@ -167,6 +196,8 @@ MSG
 			my $file = __readFile ("$dir/$filename");
 
 			if (defined $file->{'error'}) {
+				__removetmpfiles ($tmpfile);
+				__removelock ($lock);
 				return '500', 'text/plain', $file->{error};
 			}
 
@@ -178,23 +209,29 @@ MSG
 		}
 	}
 
-	my $packages_txt_file = __writeFile ("$dir/PACKAGES.TXT", \$buf);
+	my $packages_txt_file = __writeFile ($tmpfile->{'PACKAGES.TXT'}, \$buf);
 
 	if (defined $packages_txt_file->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $packages_txt_file->{error};
 	}
 
 	$gzippedBuf = __gzipData (\$buf);
 
 	if (defined $gzippedBuf->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $gzippedBuf->{error};
 	}
 
 	$buf = '';
 
-	my $packages_txt_gz_file = __writeFile ("$dir/PACKAGES.TXT.gz", \$gzippedBuf->{data});
+	my $packages_txt_gz_file = __writeFile ($tmpfile->{'PACKAGES.TXT.gz'}, \$gzippedBuf->{data});
 
 	if (defined $packages_txt_gz_file->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return ('500', 'text/plain', $packages_txt_gz_file->{error});
 	}
 
@@ -216,6 +253,8 @@ BUFFER
 	$dirlist = __dirList ($dir);
 
 	if (defined $dirlist->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $dirlist->{error};
 	}
 
@@ -241,15 +280,23 @@ BUFFER
 	}
 
 	$#filelist = -1;
-	my $filelist = __writeFile ("$dir/FILELIST.TXT", \$buf);
+	my $filelist = __writeFile ($tmpfile->{'FILELIST.TXT'}, \$buf);
 
 	if (defined $filelist->{error}) {
+		__removetmpfiles ($tmpfile);
+		__removelock ($lock);
 		return '500', 'text/plain', $filelist->{error};
 	}
 
 	$buf = '';
 
-	return '200', 'text/plain', "Done\n";
+	if (__renametmpfiles ($tmpfile)) {
+		__removelock ($lock);
+		return '200', 'text/plain', "Done\n";
+	} else {
+		__removelock ($lock);
+		return '500', 'text/plain', "Metadata rename operation error\n";
+	}
 }
 
 sub __prettyFormattedDate () {
@@ -441,6 +488,163 @@ sub __gzipData ($) {
 	}
 
 	return $ret;
+}
+
+sub __mktempfiles ($) {
+	my $basedir = shift;
+	my $file;
+
+	foreach my $tmpfile qw (CHECKSUMS.md5 CHECKSUMS.md5.gz MANIFEST.bz2 FILELIST.txt PACKAGES.txt PACKAGES.txt.gz) {
+		$file->{$tmpfile} = mktemp (
+			sprintf '%s/%s.XXXXXX.tmp', $basedir, $tmpfile
+		);
+	}
+
+	return $file;
+}
+
+sub __renametmpfiles (@) {
+	# Rename DST files to kind of temporary to be able to restore it if something goes wrong with renamning of new files
+	my $dir = shift;
+	my $file = shift;
+	my $error = 0;
+	my $origfile = __mktempfiles ($dir);
+
+	# Backup original metadata
+	foreach my $myfile (keys @{$origfile}) {
+		unless (move $myfile, $origfile->{$myfile}) {
+			carp "[FATA] unable to rename $myfile to $origfile->{$myfile}: $OS_ERROR";
+			$error = 1;
+			last;
+		}
+	}
+
+	# On error - remove our temporary files and return
+	if ($error) {
+		foreach my $myfile (keys @{$origfile}) {
+			if (-f $origfile->{$myfile}) {
+				unless (unlink $origfile->{$myfile}) {
+					carp "Unable to unlink $origfile->{$myfile}: $OS_ERROR";
+				}
+			}
+		}
+
+		return 0;
+	}
+
+	# Rename our metadata file to correct names
+	foreach my $myfile (keys @{$file}) {
+		unless (move $file->{$myfile}, $myfile) {
+			carp "[FATA] unable to rename $file->{$myfile} to $myfile: $OS_ERROR";
+			$error = 1;
+			last;
+		}
+	}
+
+	# On error - remove our files, restore original metadata and return
+	if ($error) {
+		# Remove our files
+		foreach my $myfile (keys @{$file}) {
+			# Remove temporary file
+			if (-f $file->{$myfile}) {
+				unless (unlink $file->{$myfile}) {
+					carp "Unable to unlink $file->{$myfile}: $OS_ERROR";
+				}
+			}
+
+			# Remove new metadata
+			if (-f $myfile) {
+				unless (unlink $myfile) {
+					carp "Unable to unlink $myfile: $OS_ERROR";
+				}
+			}
+		}
+
+		# Restore original metadata files
+		foreach my $myfile (keys @{$origfile}) {
+			if (-f $origfile->{$myfile}) {
+				unless (move $origfile->{$myfile}, $myfile) {
+					carp "[FATA] Unable to restore original metadata file $myfile from $origfile->{$myfile}: $OS_ERROR";
+				}
+			} else {
+				carp "[FATA] Unable to find $origfile->{$myfile} to restore  it to $myfile";
+			}
+		}
+
+		return 0;
+	}
+
+	# On success drop backup of original metadata
+	foreach my $myfile (keys @{$origfile}) {
+		unless (unlink $origfile->{$myfile}) {
+			# That is bad, but overall operation is successful, right?
+			carp "[ERRO] Unable to unlink $origfile->{$myfile}";
+		}
+	}
+
+	return 1;
+}
+
+sub __removetmpfiles ($) {
+	my $tmpfile = shift;
+
+	foreach my $filename (@{$tmpfile}) {
+		if (-f $tmpfiles->{$filename}) {
+			unless (unlink $filename) {
+				carp "[ERRO] Unable to unlink $tmpfiles->{$filename}";
+			}
+		}
+	}
+
+	return;
+}
+
+sub __setlock ($) {
+	my $lock= shift;
+	my $note = 1;
+
+	while (-f $lock->{filename}) {
+		if ($note) {
+			carp "[INFO] lock-file $lock->{filename} exists!";
+			$note = 0;
+		}
+
+		sleep 1;
+	}
+
+	unless (open $lock->{fh}, '>', $lock->{filename}) {
+		carp "[ERRO] Unable to create lock-file on $filename: $OS_ERROR";
+		return undef;
+	}
+
+	unless (flock $locak->{fh}, LOCK_EX) {
+		close $fh; ## no critic (InputOutput::RequireCheckedSyscalls)
+		carp "[ERRO] Unable to set lock on $filename: $OS_ERROR";
+		return undef;
+	}
+
+	return $lock;
+}
+
+sub __removelock (@) {
+	my $lock = shift;
+
+	unless (defined $lock) {
+		carp '[ERRO] Unable to remove metadata lock! Looks like it does not exist! or unsupported on this fs';
+		return;
+	}
+
+	unless (flock $lock->{fh}, LOCK_UN) {
+		carp "[ERRO] Unable to unlock file $lock->{filename}: $OS_ERROR";
+	}
+
+	close $lock->{fh}; ## no critic (InputOutput::RequireCheckedSyscalls)
+
+	unless (unlink $lock->{filename}) {
+		carp "[ERRO] Unable to unlink lock-file $lock->{filename}: $OS_ERROR";
+	}
+
+	return;
 }
 
 1;
