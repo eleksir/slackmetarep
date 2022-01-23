@@ -1,0 +1,9 @@
+* Make semi-atomic metadata operations fully atomic
+* Detect first run and do not complain about missing metadata
+* Validate source metadata chunks for correct format
+* Skip package if there is not enough metadata for it
+
+Optional
+* Logging level fixes
+* Settings for verbosity
+* Debug messages

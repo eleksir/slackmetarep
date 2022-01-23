@@ -1,4 +1,4 @@
-## no critic (Modules::RequireExplicitPackage)
+## no critic (Modules::RequireExplicitPackage), it is a module
 use 5.018;
 use strict;
 use warnings;
@@ -23,7 +23,7 @@ if ($CONF->{api}->{prefix} eq '/') {
 	$prefix = '';
 }
 
-my $app = sub { ## no critic (Modules::RequireEndWithOne)
+my $app = sub { ## no critic (Modules::RequireEndWithOne), it is not a module
 	my $env = shift;
 
 	my $msg = "Your Opinion is very important for us, please stand by.\n";
