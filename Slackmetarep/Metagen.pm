@@ -477,15 +477,15 @@ sub __gzipData ($) {
 	my $databufref = shift;
 	my $ret;
 
-	my $gz = Compress::Raw::Zlib::Deflate->new (
+	my ($gz, $status) = Compress::Raw::Zlib::Deflate->new (
 		-Level => Z_BEST_COMPRESSION,
-		-CRC32 => 1,
-		-ADLER32=> 1,
-		-WindowBits => WANT_GZIP
+		-WindowBits => WANT_GZIP,
+		-AppendOutput => 1,
 	);
 
-	unless (defined $gz) {
-		my $msg = 'Unable to create gz object';
+
+	if ($status != Z_OK) {
+		my $msg = "Unable to create gz object: $status";
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
 		return $ret;
