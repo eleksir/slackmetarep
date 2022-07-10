@@ -31,8 +31,8 @@ use English qw ( -no_match_vars );
 
 use bytes ();
 use Carp qw (carp cluck);
-use Compress::Raw::Bzip2 qw (BZ_RUN_OK BZ_STREAM_END);
-use Compress::Raw::Zlib;
+use Compress::Raw::Bzip2 qw (BZ_OK BZ_RUN_OK BZ_STREAM_END);
+use Compress::Raw::Zlib qw (Z_BEST_COMPRESSION WANT_GZIP Z_OK);
 use Data::Dumper;
 use Fcntl qw (:DEFAULT :flock);
 use File::Temp qw (mktemp tempfile);
@@ -68,7 +68,11 @@ sub Metagen ($) {
 
 	$dir = '' . $c->{metagen}->{$dir};
 
-	unless (defined $dir || ($dir eq '')) {
+	unless (defined $dir) {
+		return '400', 'text/plain', "No such repository\n";
+	}
+
+	if ($dir eq '') {
 		return '400', 'text/plain', "No such repository\n";
 	}
 
@@ -169,7 +173,7 @@ MSG
 
 	if (defined $checksum_md5_file->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $checksum_md5_file->{error};
 	}
 
@@ -178,7 +182,7 @@ MSG
 
 	if (defined $gzippedBuf->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $gzippedBuf->{error};
 	}
 
@@ -188,7 +192,7 @@ MSG
 
 	if (defined $checksum_md5_gz_file->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $checksum_md5_gz_file->{error};
 	}
 
@@ -207,7 +211,7 @@ MSG
 
 			if (defined $file->{'error'}) {
 				__removetmpfiles ($tmpfiles);
-				__removelock ($lock);
+				__removelock     ($lock);
 				return '500', 'text/plain', $file->{error};
 			}
 
@@ -226,7 +230,7 @@ MSG
 
 	if (defined $packages_txt_file->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $packages_txt_file->{error};
 	}
 
@@ -234,7 +238,7 @@ MSG
 
 	if (defined $gzippedBuf->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $gzippedBuf->{error};
 	}
 
@@ -244,8 +248,8 @@ MSG
 
 	if (defined $packages_txt_gz_file->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
-		return ('500', 'text/plain', $packages_txt_gz_file->{error});
+		__removelock     ($lock);
+		return '500', 'text/plain', $packages_txt_gz_file->{error};
 	}
 
 	$gzippedBuf->{data} = '';
@@ -267,7 +271,7 @@ BUFFER
 
 	if (defined $dirlist->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $dirlist->{error};
 	}
 
@@ -298,7 +302,7 @@ BUFFER
 
 	if (defined $filelist->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
 		return '500', 'text/plain', $filelist->{error};
 	}
 
@@ -314,22 +318,26 @@ BUFFER
 }
 
 sub __prettyFormattedDate () {
-	my @time = gmtime(time);
-	my @DAYOFWEEK = qw(Sun Mon Tue Wed Thu Fri Sat);
-	my @MONTH = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Nov Dec);
+	my @time =      gmtime (time);
+	my @DAYOFWEEK = qw (Sun Mon Tue Wed Thu Fri Sat);
+	my @MONTH =     qw (Jan Feb Mar Apr May Jun Jul Aug Sep Nov Dec);
+
 	return strftime "$DAYOFWEEK[$time[6]] $MONTH[$time[4] - 1] %e %T UTC %Y", @time;
 }
 
 sub __trim ($) {
 	my $str = shift;
 
-	while (substr ($str, 0, 1) =~ /^\s$/xms) {
-		$str = substr $str, 1;
+	unless (defined $str) {
+		return $str;
 	}
 
-	while (substr ($str, -1, 1) =~ /^\s$/xms) {
-		chop $str;
+	if ($str eq '') {
+		return $str;
 	}
+
+	$str =~ s/^\s+//uxms;
+	$str =~ s/\s+$//uxms;
 
 	return $str;
 }
@@ -437,9 +445,10 @@ sub __dirList ($) {
 sub __bzip2Data ($) {
 	my $databufref = shift;
 	my $ret;
-	my $bz = Compress::Raw::Bzip2->new (1, 9, 0);
+	# Use AppendOutput = true, Compression = 9 (9x100k = 900k dictionary size), workfactor = default (typically, 30)
+	my ($bz, $status) = Compress::Raw::Bzip2->new (1, 9, 0);
 
-	unless (defined $bz) {
+	if ($status != BZ_OK) {
 		my $msg = 'Unable to create bz object';
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
