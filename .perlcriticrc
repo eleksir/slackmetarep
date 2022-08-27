@@ -1,6 +1,19 @@
 #!/usr/bin/env perlcritic
-severity    = 5
-verbose     = 8
+
+# Perl::Critic::More
+# Perl::Critic::Pulp
+# Perl::Critic::TooMuchCode
+# Perl::Critic::Lax
+# Perl::Critic::CognitiveComplexity
+# Perl::Critic::Policy::CompileTime
+# Perl::Critic::Policy::ProhibitImplicitImport
+# Perl::Critic::Policy::Dynamic::NoIndirect
+# Perl::Critic::StricterSubs
+# Perl::Critic::Policy::ProhibitImplicitImport
+# Perl::Critic::Policy::CodeLayout::RequireUseUTF8
+
+severity    = 1
+verbose     = 9
 
 # minorify some of warnings that are not really critical
 [-InputOutput::RequireCheckedClose]
@@ -61,3 +74,27 @@ verbose     = 8
 
 [-ControlStructures::ProhibitCStyleForLoops]
 # But it way much more conventional and less butt-ugly that perlish notaion with $_ as conter var
+
+[-Editor::RequireEmacsFileVariables]
+# I don't use it
+
+[-Lax::RequireExplicitPackage::ExceptForPragmata]
+# Nope, just nope
+
+[-TooMuchCode::ProhibitUnnecessaryUTF8Pragma]
+# no-no-no, i *want* mess up with utf8
+
+[-ValuesAndExpressions::RequireConstantOnLeftSideOfEquality]
+# that perlish shit... it makes code weird
+
+[-Lax::ProhibitEmptyQuotes::ExceptAsFallback]
+# but i want to use = '' as empty value comparsion!
+
+[-TooMuchCode::ProhibitLargeBlock]
+# who say it big?
+
+[-TooMuchCode::ProhibitDuplicateLiteral]
+# I want to use = '' multiple times in a row
+
+[-ValuesAndExpressions::RestrictLongStrings]
+# Just fuck off

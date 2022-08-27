@@ -1,15 +1,18 @@
 package Slackmetarep::Buildinfo;
 
-use 5.018;
+use 5.020; ## no critic (ProhibitImplicitImport)
 use strict;
 use warnings;
-use utf8;
-use open qw (:std :utf8);
-use English qw ( -no_match_vars );
+use feature qw (signatures);  # no longer experimental in v5.36.0
+no warnings qw (experimental::signatures); ## no critic (TestingAndDebugging::ProhibitNoWarnings)
 
-use Carp;
-use Encode qw (encode);
-use JSON::XS;
+use utf8;
+use open     qw (:std :utf8);
+use English  qw ( -no_match_vars );
+
+use Carp     qw (carp);
+use Encode   qw (encode);
+use JSON::XS    ();
 
 use Slackmetarep::Conf qw (LoadConf);
 
@@ -19,8 +22,7 @@ our @EXPORT_OK = qw (BuildInfo);
 
 my $c = LoadConf ();
 
-sub BuildInfo ($) {
-	my $repo = shift;
+sub BuildInfo ($repo) {
 	my ($status, $content, $msg) = ('400', 'text/plain', "Bad Request?\n");
 
 	# Request cosists of repo/package, so it must contain slash
@@ -36,7 +38,7 @@ sub BuildInfo ($) {
 	}
 
 	open (my $jhandle, '<', $c->{buildinfo}->{$config}) or do {
-		$msg = "Unable to open $c->{buildinfo}->{$config}; $OS_ERROR\n";
+		$msg = "Unable to open $c->{buildinfo}->{$config}: $OS_ERROR\n";
 		carp '[FATA] ' . $msg;
 		return '500', $content, $msg;
 	};
@@ -67,11 +69,13 @@ sub BuildInfo ($) {
 	my $j = eval {
 		my $jq = JSON::XS->new->utf8->relaxed;
 		$jq->decode ($json);
-	} or do {
+	};
+
+	unless (defined $j) {
 		$msg = "Error during decoding $c->{buildinfo}->{$config}; $EVAL_ERROR\n";
 		carp '[FATA] ' . $msg;
 		return '500', $content, $msg;
-	};
+	}
 
 	$json = '';
 
@@ -82,12 +86,16 @@ sub BuildInfo ($) {
 	}
 
 	# Use small indentation, just 1 space and default formatting
-	my $jq = JSON::XS->new->pretty->canonical->indent (1);
-	$msg = $jq->encode ($j->{$package}) or do {
+	$msg = eval {
+		my $jq = JSON::XS->new->pretty->canonical->indent (1);
+		$jq->encode ($j->{$package});
+	};
+
+	unless (defined $msg) {
 		$msg = "Unable to encode json.\n";
 		carp '[ERRO] ' . $msg;
 		return '500', $content, $msg;
-	};
+	}
 
 	return '200', 'application/json', $msg;
 }

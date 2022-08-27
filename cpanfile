@@ -1,5 +1,7 @@
 ## no critic (Modules::RequireVersionVar,Modules::RequireExplicitPackage,Modules::RequireEndWithOne)
 ## no critic (TestingAndDebugging::RequireUseStrict,TestingAndDebugging::RequireUseWarnings)
+# part of perl
+requires 'bytes',                '0';
 # part of perl, but it is dual-life module
 requires 'Compress::Raw::Bzip2', '==2.201';
 # part of perl, but it is dual-life module

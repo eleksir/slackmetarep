@@ -1,13 +1,18 @@
 package Slackmetarep::Upload;
 
-use 5.018;
+use 5.020; ## no critic (ProhibitImplicitImport)
 use strict;
 use warnings;
+use feature 'signatures';  # no longer experimental in v5.36.0
+no warnings qw (experimental::signatures); ## no critic (TestingAndDebugging::ProhibitNoWarnings)
+
+use utf8;
+
 use vars qw/$VERSION/;
 use English qw ( -no_match_vars );
-use Carp;
+use Carp qw (carp);
 
-use Fcntl;
+use Fcntl qw (O_CREAT O_TRUNC O_WRONLY);
 use Slackmetarep::Conf qw (LoadConf);
 
 use version; our $VERSION = qw (1.0);
@@ -16,14 +21,14 @@ our @EXPORT_OK = qw (Upload);
 
 my $c = LoadConf ();
 
-sub Upload {
-	my $input = shift;        # file descriptor with data being uploaded
-	my $len = shift;          # expected data length (from client)
-	my $name = shift;         # upload "dir" and filename
+sub Upload :lvalue ($input, $len, $name) {
+	#	$input - file descriptor with data being uploaded
+	#	$len   - expected data length (from client)
+	#	$name  - upload "dir" and filename
 	my ($status, $content, $msg) = ('400', 'text/plain', "Bad Request?\n");
 
 	return ($status, $content, "No Content-Length supplied.\n") unless (defined $len);
-	return ($status, $content, "No name supplied.\n") unless (defined $name);
+	return ($status, $content, "No name supplied.\n")           unless (defined $name);
 
 	my $d;
 	($d, $name) = split /\//xms, $name, 2;
@@ -35,6 +40,7 @@ sub Upload {
 	my $match;
 
 	foreach my $uploaddir (keys %{$c->{upload}->{dir}}) {
+		warn "$d vs $uploaddir\n";
 		if ($d eq $uploaddir) {
 			$match = 1;
 			last;
@@ -70,6 +76,7 @@ sub Upload {
 					unlink $name;
 					$buf = '';
 					carp "[FATA] Unable to write to $name: $OS_ERROR";
+
 					return '500', $content, "An error has occured during upload: $OS_ERROR\n";
 				}
 
@@ -79,6 +86,7 @@ sub Upload {
 					unlink $name;
 					$buf = '';
 					carp "[FATA] Must write $readlen bytes, but actualy wrote $written bytes to $name";
+
 					return '500', $content, "An error has occured during upload: $OS_ERROR\n";
 				}
 

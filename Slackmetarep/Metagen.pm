@@ -21,49 +21,34 @@
 
 package Slackmetarep::Metagen;
 
-use 5.018;
+use 5.020; ## no critic (ProhibitImplicitImport)
 use warnings;
 use strict;
+use feature qw (signatures);  # no longer experimental in v5.36.0
+no warnings qw (experimental::signatures); ## no critic (TestingAndDebugging::ProhibitNoWarnings)
 
 use utf8;
-use open qw (:std :utf8);
+use open    qw (:std :utf8);
 use English qw ( -no_match_vars );
 
-use bytes ();
-use Carp qw (carp cluck);
+use Carp                 qw (carp);
 use Compress::Raw::Bzip2 qw (BZ_OK BZ_RUN_OK BZ_STREAM_END);
-use Compress::Raw::Zlib qw (Z_BEST_COMPRESSION WANT_GZIP Z_OK);
-use Data::Dumper;
-use Fcntl qw (:DEFAULT :flock);
-use File::Temp qw (mktemp tempfile);
-use File::Copy qw (move);
-use MIME::Base64;
-use POSIX qw (strftime);
+use Compress::Raw::Zlib  qw (Z_BEST_COMPRESSION WANT_GZIP Z_OK);
+use Fcntl                qw (:DEFAULT LOCK_EX LOCK_UN O_WRONLY O_TRUNC O_CREAT);
+use File::Temp           qw (mktemp);
+use File::Copy           qw (move);
+use MIME::Base64         qw (encode_base64);
+use POSIX                qw (strftime);
 
 use Slackmetarep::Conf qw (LoadConf);
 
 use version; our $VERSION = qw (1.0);
-use Exporter qw (import);
+use Exporter     qw (import);
 our @EXPORT_OK = qw (Metagen __mktmpfiles);
-
-sub Metagen ($);
-sub __prettyFormattedDate ();
-sub __trim ($);
-sub __readFile ($);
-sub __dirList ($);
-sub __writeFile (@);
-sub __bzip2Data ($);
-sub __gzipData ($);
-sub __mktmpfiles ($);
-sub __renametmpfiles (@);
-sub __removetmpfiles ($);
-sub __setlock ($);
-sub __removelock (@);
 
 my $lockfile = '.update.lock';
 
-sub Metagen ($) {
-	my $dir = shift;
+sub Metagen ($dir) {
 	my $c = LoadConf ();
 
 	$dir = '' . $c->{metagen}->{$dir};
@@ -101,11 +86,12 @@ sub Metagen ($) {
 
 			if (defined $file->{'error'}) {
 				__removetmpfiles ($tmpfiles);
-				__removelock ($lock);
+				__removelock     ($lock);
+
 				return '500', 'text/plain', $file->{error};
 			}
 
-			$buf .= __trim $file->{data};
+			$buf .= __trim ($file->{data});
 			$buf .= "\n\n\n";
 
 			$file->{data} = '';
@@ -117,7 +103,8 @@ sub Metagen ($) {
 
 	if (defined $bzippedData->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
+
 		return '500', 'text/plain', $bzippedData->{error};
 	}
 
@@ -125,7 +112,8 @@ sub Metagen ($) {
 
 	if (defined $manifest_bz2->{error}) {
 		__removetmpfiles ($tmpfiles);
-		__removelock ($lock);
+		__removelock     ($lock);
+
 		return '500', 'text/plain', $manifest_bz2->{error};
 	}
 
@@ -158,7 +146,8 @@ MSG
 
 			if (defined $file->{'error'}) {
 				__removetmpfiles ($tmpfiles);
-				__removelock ($lock);
+				__removelock     ($lock);
+
 				return '500', 'text/plain', $file->{error};
 			}
 
@@ -174,6 +163,7 @@ MSG
 	if (defined $checksum_md5_file->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $checksum_md5_file->{error};
 	}
 
@@ -183,6 +173,7 @@ MSG
 	if (defined $gzippedBuf->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $gzippedBuf->{error};
 	}
 
@@ -193,6 +184,7 @@ MSG
 	if (defined $checksum_md5_gz_file->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $checksum_md5_gz_file->{error};
 	}
 
@@ -212,6 +204,7 @@ MSG
 			if (defined $file->{'error'}) {
 				__removetmpfiles ($tmpfiles);
 				__removelock     ($lock);
+
 				return '500', 'text/plain', $file->{error};
 			}
 
@@ -231,6 +224,7 @@ MSG
 	if (defined $packages_txt_file->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $packages_txt_file->{error};
 	}
 
@@ -239,6 +233,7 @@ MSG
 	if (defined $gzippedBuf->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $gzippedBuf->{error};
 	}
 
@@ -249,6 +244,7 @@ MSG
 	if (defined $packages_txt_gz_file->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $packages_txt_gz_file->{error};
 	}
 
@@ -256,7 +252,7 @@ MSG
 	$gzippedBuf = undef;
 
 	# Generate FILELIST.TXT
-	$buf = __prettyFormattedDate;
+	$buf = __prettyFormattedDate ();
 	$buf .= "\n\n";
 	$buf .= << 'BUFFER';
 Here is the file list for this directory,
@@ -272,6 +268,7 @@ BUFFER
 	if (defined $dirlist->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $dirlist->{error};
 	}
 
@@ -292,7 +289,7 @@ BUFFER
 			$date[3],
 			$date[2],
 			$date[1],
-			$filelist[$i]
+			$filelist[$i],
 		);
 	}
 
@@ -303,16 +300,19 @@ BUFFER
 	if (defined $filelist->{error}) {
 		__removetmpfiles ($tmpfiles);
 		__removelock     ($lock);
+
 		return '500', 'text/plain', $filelist->{error};
 	}
 
 	$buf = '';
 
 	if (__renametmpfiles ($dir, $tmpfiles)) {
-		__removelock ($lock);
+		__removelock     ($lock);
+
 		return '200', 'text/plain', "Done\n";
 	} else {
 		__removelock ($lock);
+
 		return '500', 'text/plain', "Metadata rename operation error\n";
 	}
 }
@@ -325,9 +325,7 @@ sub __prettyFormattedDate () {
 	return strftime "$DAYOFWEEK[$time[6]] $MONTH[$time[4] - 1] %e %T UTC %Y", @time;
 }
 
-sub __trim ($) {
-	my $str = shift;
-
+sub __trim ($str) {
 	unless (defined $str) {
 		return $str;
 	}
@@ -342,8 +340,7 @@ sub __trim ($) {
 	return $str;
 }
 
-sub __readFile ($) {
-	my $file = shift;
+sub __readFile ($file) {
 	my $ret;
 
 	open (my $FILEHANDLE, '<', $file) or do {
@@ -377,9 +374,7 @@ sub __readFile ($) {
 	return $ret;
 }
 
-sub __writeFile (@) {
-	my $file = shift;
-	my $dataref = shift;
+sub __writeFile :lvalue ($file, $dataref) {
 	my $ret;
 
 	unless (defined $file) {
@@ -390,13 +385,14 @@ sub __writeFile (@) {
 		my $msg = "Unable to open file for writing $file: $OS_ERROR";
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
+
 		return $ret;
 	};
 
 	binmode $FILEHANDLE;
 
-	my $len = bytes::length ${$dataref};
-	use bytes;
+	use bytes qw (length);
+	my $len = length ${$dataref};
 	my $writelen = syswrite $FILEHANDLE, ${$dataref}, $len;
 	no bytes;
 	close $FILEHANDLE; ## no critic (InputOutput::RequireCheckedSyscalls)
@@ -405,6 +401,7 @@ sub __writeFile (@) {
 		my $msg = "Unable to write $file: $OS_ERROR";
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
@@ -412,15 +409,16 @@ sub __writeFile (@) {
 		my $msg = "Unable to write $file: amount of read bytes does not match with file size";
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
 	$ret->{success} = 1;
+
 	return $ret;
 }
 
-sub __dirList ($) {
-	my $dir = shift;
+sub __dirList ($dir) {
 	my $res;
 	my @files;
 
@@ -428,22 +426,23 @@ sub __dirList ($) {
 		my $msg = "Unable to open $dir: $OS_ERROR";
 		carp "[FATA] $msg";
 		$res->{error} = $msg;
+
 		return $msg;
 	};
 
 	while (readdir $dirhandle) {
-		next unless (-f "$dir/$_");
+		next unless (-f "$dir/$_"); ## no critic (ValuesAndExpressions::ProhibitFiletest_f)
 		push @files, $_;
 	}
 
 	closedir $dirhandle;
 	@files = sort @files;
 	$res->{dir} = \@files;
+
 	return $res;
 }
 
-sub __bzip2Data ($) {
-	my $databufref = shift;
+sub __bzip2Data ($databufref) {
 	my $ret;
 	# Use AppendOutput = true, Compression = 9 (9x100k = 900k dictionary size), workfactor = default (typically, 30)
 	my ($bz, $status) = Compress::Raw::Bzip2->new (1, 9, 0);
@@ -452,6 +451,7 @@ sub __bzip2Data ($) {
 		my $msg = 'Unable to create bz object';
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
@@ -460,6 +460,7 @@ sub __bzip2Data ($) {
 		carp "[FATA] $msg";
 		delete ($ret->{data});
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
@@ -468,6 +469,7 @@ sub __bzip2Data ($) {
 		carp "[FATA] $msg";
 		delete ($ret->{data});
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
@@ -476,17 +478,17 @@ sub __bzip2Data ($) {
 		carp "[FATA] $msg";
 		delete ($ret->{data});
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
 	return $ret;
 }
 
-sub __gzipData ($) {
-	my $databufref = shift;
+sub __gzipData ($databufref) {
 	my $ret;
 
-	my ($gz, $status) = Compress::Raw::Zlib::Deflate->new (
+	my ($gz, $status) = Compress::Raw::Zlib::Deflate->new ( ## no critic (Modules::RequireExplicitInclusion), this module is dodgy
 		-Level => Z_BEST_COMPRESSION,
 		-WindowBits => WANT_GZIP,
 		-AppendOutput => 1,
@@ -497,6 +499,7 @@ sub __gzipData ($) {
 		my $msg = "Unable to create gz object: $status";
 		carp "[FATA] $msg";
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
@@ -505,6 +508,7 @@ sub __gzipData ($) {
 		carp "[FATA] $msg";
 		delete ($ret->{data});
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
@@ -513,14 +517,14 @@ sub __gzipData ($) {
 		carp "[FATA] $msg";
 		delete ($ret->{data});
 		$ret->{error} = $msg;
+
 		return $ret;
 	}
 
 	return $ret;
 }
 
-sub __mktmpfiles ($) {
-	my $basedir = shift;
+sub __mktmpfiles ($basedir) {
 	my $file;
 	my @metafiles = ('CHECKSUMS.md5', 'CHECKSUMS.md5.gz', 'MANIFEST.bz2', 'FILELIST.TXT', 'PACKAGES.TXT', 'PACKAGES.TXT.gz');
 
@@ -532,11 +536,8 @@ sub __mktmpfiles ($) {
 	return $file;
 }
 
-sub __renametmpfiles (@) {
+sub __renametmpfiles ($dir, $file) {
 	# Rename DST files to kind of temporary to be able to restore it if something goes wrong with renamning of new files
-	my $dir = shift;
-	my $file = shift;
-
 	my $error = 0;
 	my $origfile = __mktmpfiles ($dir);
 
@@ -544,7 +545,7 @@ sub __renametmpfiles (@) {
 	foreach my $myfile (keys %{$origfile}) {
 		my $warningShown = 0;
 
-		if (-f $origfile->{$myfile}->{filename}) {
+		if (-e $origfile->{$myfile}->{filename}) {
 			unless (move $origfile->{$myfile}->{filename}, $origfile->{$myfile}->{tmpfilename}) {
 				unless ($warningShown) {
 					carp '[WARN] If this is first run, ignore next complians about renaming, we have no metadata files yet';
@@ -556,8 +557,8 @@ sub __renametmpfiles (@) {
 						'[WARN] Unable to rename original metadata file %s to %s: %s',
 						$origfile->{$myfile}->{filename},
 						$origfile->{$myfile}->{tmpfilename},
-						$OS_ERROR
-					)
+						$OS_ERROR,
+					),
 				);
 
 			}
@@ -572,8 +573,8 @@ sub __renametmpfiles (@) {
 					'[FATA] unable to rename temporary metadata file %s to %s: %s',
 					$file->{$myfile}->{tmpfilename},
 					$file->{$myfile}->{filename},
-					$OS_ERROR
-				)
+					$OS_ERROR,
+				),
 			);
 
 			$error = 1;
@@ -588,27 +589,27 @@ sub __renametmpfiles (@) {
 		# Remove our files
 		foreach my $myfile (keys %{$file}) {
 			# Remove temporary file
-			if (-f $file->{$myfile}->{tmpfilename}) {
+			if (-e $file->{$myfile}->{tmpfilename}) {
 				unless (unlink $file->{$myfile}->{tmpfilename}) {
 					carp (
 						sprintf (
 							'[ERRO] Unable to unlink %s: %s',
 							$file->{$myfile}->{tmpfilename},
-							$OS_ERROR
-						)
+							$OS_ERROR,
+						),
 					);
 				}
 			}
 
 			# Remove new metadata file
-			if (-f $file->{$myfile}->{filename}) {
+			if (-e $file->{$myfile}->{filename}) {
 				unless (unlink $file->{$myfile}->{filename}) {
 					carp (
 						sprintf (
 							'[ERRO] Unable to unlink %s: %s',
 							$file->{$myfile}->{filename},
-							$OS_ERROR
-						)
+							$OS_ERROR,
+						),
 					);
 				}
 			}
@@ -616,15 +617,15 @@ sub __renametmpfiles (@) {
 
 		# Restore original metadata files, if they exist
 		foreach my $myfile (keys %{$origfile}) {
-			if (-f $origfile->{$myfile}->{tmpfilename}) {
+			if (-e $origfile->{$myfile}->{tmpfilename}) {
 				unless (move $origfile->{$myfile}->{tmpfilename}, $origfile->{$myfile}->{filename}) {
 					carp (
 						sprintf (
 							'[FATA] Unable to restore original metadata file %s from %s: %s',
 							$origfile->{$myfile}->{tmpfilename},
 							$origfile->{$myfile}->{filename},
-							$OS_ERROR
-						)
+							$OS_ERROR,
+						),
 					);
 				}
 			} else {
@@ -632,8 +633,8 @@ sub __renametmpfiles (@) {
 					sprintf (
 						'[FATA] Unable to find backup of original metadata file %s to restore it to %s',
 						$origfile->{$myfile}->{tmpfilename},
-						$origfile->{$myfile}->{filename}
-					)
+						$origfile->{$myfile}->{filename},
+					),
 				);
 			}
 		}
@@ -643,15 +644,15 @@ sub __renametmpfiles (@) {
 
 	# On success drop backup of original metadata if exist, ofcorse
 	foreach my $myfile (keys %{$origfile}) {
-		if (-f $origfile->{$myfile}->{tmpfilename}) {
+		if (-e $origfile->{$myfile}->{tmpfilename}) {
 			unless (unlink $origfile->{$myfile}->{tmpfilename}) {
 				# That is bad, but overall operation is successful, right?
 				carp (
 					sprintf (
 						'[ERRO] Unable to unlink %s: %s',
 						$origfile->{$myfile}->{tmpfilename},
-						$OS_ERROR
-					)
+						$OS_ERROR,
+					),
 				);
 			}
 		}
@@ -660,22 +661,20 @@ sub __renametmpfiles (@) {
 	return 1;
 }
 
-sub __removetmpfiles ($) {
-	my $tmpfile = shift;
-
+sub __removetmpfiles ($tmpfile) {
 	unless (defined $tmpfile) {
 		return ;
 	}
 
 	foreach my $filename (keys %{$tmpfile}) {
-		if (-f $tmpfile->{$filename}->{tmpfilename}) {
+		if (-e $tmpfile->{$filename}->{tmpfilename}) {
 			unless (unlink $tmpfile->{$filename}->{tmpfilename}) {
 				carp (
 					sprintf (
 						'[ERRO] Unable to unlink %s: %s',
 						$tmpfile->{$filename}->{tmpfilename},
-						$OS_ERROR
-					)
+						$OS_ERROR,
+					),
 				);
 			}
 		}
@@ -684,8 +683,7 @@ sub __removetmpfiles ($) {
 	return;
 }
 
-sub __setlock ($) {
-	my $lock= shift;
+sub __setlock ($lock) {
 	my $note = 1;
 
 	unless (open $lock->{fh}, '>', $lock->{filename}) {
@@ -702,9 +700,7 @@ sub __setlock ($) {
 	return $lock;
 }
 
-sub __removelock (@) {
-	my $lock = shift;
-
+sub __removelock ($lock) {
 	unless (defined $lock) {
 		carp '[ERRO] Unable to remove metadata lock! Looks like it does not exist! or unsupported on this fs';
 		return;
