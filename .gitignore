@@ -1,2 +1,6 @@
-vendor_perl
+_Deparsed_XSubs.pm
+.idea/**
+.vscode/**
+.vstags
 data/config.json
+vendor_perl/**
